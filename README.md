@@ -3,7 +3,7 @@ This small project turns accessible(!) input fields on macOS into full vim
 buffers. It should behave and feel like native vim, because, under the hood
 I synchronize the text field with a real vim buffer.
 
-![demo](https://user-images.githubusercontent.com/22680421/153753171-e818d40b-4d72-4b88-9719-d1e36d16dec0.gif)
+![demo](https://user-images.githubusercontent.com/22680421/153753171-e818d40b-4d88-9719-d1e36d16dec0.gif)
 
 You can use all modes (even commandline etc.) and all commands included in vim.
 
@@ -59,7 +59,8 @@ just update
 ```
 
 The installed executable is kept at `~/.local/bin/svim`, so rebuilding the checkout
-does not disturb the running service.
+does not disturb the running service. The local service is code-signed with a
+persistent identity so Accessibility permission survives rebuilds.
 
 ### Keeping the fork current with upstream
 
@@ -70,7 +71,7 @@ The fork is maintained as a small patch stack on top of
 just upstream-check
 ```
 
-To rebase the local patch stack onto current upstream, rebuild, install, and
+To rebase the local patch stack onto current upstream, rebuild, sign, install, and
 restart:
 
 ```bash
@@ -95,6 +96,34 @@ opens or updates `automation/upstream-sync` as a review PR. The PR is deliberate
 a review/CI surface rather than a merge target because accepting an upstream sync
 requires rewriting the fork's patch commits. If the automated rebase conflicts,
 the workflow opens or updates an issue instead.
+
+### Local upstream update notifications
+
+`just install`, `just update`, and `just sync-upstream` also install a second user
+LaunchAgent, `com.josephcourtney.svim-upstream-check`. It runs once when loaded and
+then every six hours. The watcher fetches upstream and compares `upstream/master`
+with the fork's local `master` branch.
+
+When upstream contains commits that local `master` does not yet contain, the
+watcher sends a macOS notification. It prefers Hammerspoon notifications when the
+`hs` CLI is available and falls back to `osascript`. A particular upstream commit
+only generates one notification; the remembered SHA is stored in
+`~/.local/state/svim/upstream-notified` and is cleared after the fork catches up.
+
+Useful watcher commands are:
+
+```bash
+just upstream-watch          # run one check now
+just upstream-watch-status   # show the six-hour LaunchAgent state
+just upstream-watch-logs     # follow watcher stdout/stderr
+just upstream-watch-install  # reinstall/reload it, e.g. after moving the repo
+just upstream-watch-stop     # stop only the watcher
+```
+
+Each check also emits the optional SketchyBar event `svim_upstream_update` when
+`sketchybar` is available. Subscribers receive `available=1`, `count`, and `sha`
+when an update is pending, or `available=0` after the fork catches up. Existing
+SketchyBar configurations that do not subscribe to this event are unaffected.
 
 You can change the macOS selection color to anything you like with this command (which is my green):
 ```bash
