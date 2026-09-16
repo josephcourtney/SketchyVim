@@ -45,8 +45,9 @@ static void acquire_lockfile(void) {
 }
 
 int main (int argc, char *argv[]) {
-  NSApplicationLoad();
-
+  // One-shot CLI operations do not need AppKit initialization. Keeping them
+  // ahead of NSApplicationLoad() avoids unnecessary application registration
+  // and lets status/access checks run cleanly when the daemon is stopped.
   if (argc == 2 && strcmp(argv[1], "--check-access") == 0) {
     return ax_access_granted() ? 0 : 1;
   }
@@ -60,6 +61,8 @@ int main (int argc, char *argv[]) {
     }
     return 0;
   }
+
+  NSApplicationLoad();
 
   signal(SIGCHLD, SIG_IGN);
   signal(SIGPIPE, SIG_IGN);
