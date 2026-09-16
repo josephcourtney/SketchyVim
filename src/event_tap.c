@@ -1,5 +1,7 @@
 #include "event_tap.h"
 
+volatile sig_atomic_t g_svim_suspended = 0;
+
 bool event_tap_check_blacklist(struct event_tap* event_tap,
                                char* app, char* bundle_id  ) {
   if (!app || !bundle_id) return true;
@@ -22,10 +24,8 @@ static CGEventRef key_handler(CGEventTapProxy proxy, CGEventType type,
       CGEventTapEnable(((struct event_tap*) reference)->handle, true);
     } break;
     case kCGEventKeyDown: {
-      if (((struct event_tap*) reference)->front_app_ignored) {
-        if (g_ax.selected_element && g_ax.role) {
-          ax_clear(&g_ax);
-        }
+      if (g_svim_suspended
+          || ((struct event_tap*) reference)->front_app_ignored) {
         return event;
       }
 

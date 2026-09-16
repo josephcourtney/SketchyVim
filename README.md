@@ -13,7 +13,21 @@ custom vim configurations, e.g. remappings (see the examples folder).
 Additionally, you can edit the `blacklist` file in the `~/.config/svim/` folder
 to manually exclude applications from being handled by svim.
 You will likely want to blacklist your terminal emulator and gvim, such that there
-is no conflict.
+is no conflict. Entering a blacklisted application clears SketchyVim's current
+accessibility/Vim state immediately; subsequent key events are passed through
+unchanged.
+
+SketchyVim can also be temporarily bypassed without clearing its current Vim mode
+or buffer state. This is useful for system-wide modal key interfaces that need
+exclusive access to unmodified keys while active:
+
+```bash
+# Temporarily pass all key events through SketchyVim unchanged.
+pkill -USR1 svim
+
+# Resume normal SketchyVim handling.
+pkill -USR2 svim
+```
 
 Every time the vim mode changes, or a commandline update is issued, the script
 `svim.sh` in the folder `~/.config/svim/` is executed where you can handle 

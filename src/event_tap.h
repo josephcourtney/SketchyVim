@@ -1,6 +1,7 @@
 #pragma once
 #include <stdbool.h>
 #include <Carbon/Carbon.h>
+#include <signal.h>
 #include <stdint.h>
 #include "ax.h"
 #include "buffer.h"
@@ -18,6 +19,8 @@ struct event_tap {
 };
 
 struct event_tap g_event_tap;
+extern volatile sig_atomic_t g_svim_suspended;
+
 bool event_tap_enabled(struct event_tap *event_tap);
 bool event_tap_begin(struct event_tap *event_tap);
 void event_tap_end(struct event_tap *event_tap);

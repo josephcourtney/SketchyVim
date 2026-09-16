@@ -6,6 +6,16 @@
 
 void* g_workspace;
 
+static void suspend_svim(int signal_number) {
+  (void) signal_number;
+  g_svim_suspended = 1;
+}
+
+static void resume_svim(int signal_number) {
+  (void) signal_number;
+  g_svim_suspended = 0;
+}
+
 static void acquire_lockfile(void) {
   char *user = getenv("USER");
   if (!user) printf("Error: User variable not set.\n"), exit(1);
@@ -37,6 +47,8 @@ int main (int argc, char *argv[]) {
   NSApplicationLoad();
   signal(SIGCHLD, SIG_IGN);
   signal(SIGPIPE, SIG_IGN);
+  signal(SIGUSR1, suspend_svim);
+  signal(SIGUSR2, resume_svim);
 
   acquire_lockfile();
   ax_begin(&g_ax);
