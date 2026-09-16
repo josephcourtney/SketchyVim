@@ -146,7 +146,8 @@ upstream-check: _ensure-upstream
     echo
     git log --oneline --decorate HEAD.."$ref"
 
-# Rebase this fork's patch stack onto the latest upstream, rebuild, install, and restart.
+# Rebase this fork's patch stack onto the latest upstream when needed, then always
+# rebuild, sign, install, and restart the current master.
 # Stops on conflicts so they can be resolved explicitly with git rebase --continue.
 sync-upstream: _ensure-upstream
     #!/bin/zsh
@@ -167,13 +168,13 @@ sync-upstream: _ensure-upstream
     ref="{{upstream_remote}}/{{upstream_branch}}"
     new_count=$(git rev-list --count HEAD.."$ref")
 
-    if (( new_count == 0 )); then
-      echo "already up to date with $ref"
-      exit 0
+    if (( new_count > 0 )); then
+      echo "rebasing local patch stack onto $ref"
+      git rebase "$ref"
+    else
+      echo "already up to date with $ref; rebuilding and installing current master"
     fi
 
-    echo "rebasing local patch stack onto $ref"
-    git rebase "$ref"
     git submodule update --init --recursive
 
     make distclean
@@ -183,8 +184,12 @@ sync-upstream: _ensure-upstream
     just _install-files
     just _restart-if-authorized
 
-    echo "synced with $ref, rebuilt, signed, and installed"
-    echo "master was rebased; use 'just push-upstream-sync' to update origin"
+    if (( new_count > 0 )); then
+      echo "synced with $ref, rebuilt, signed, and installed"
+      echo "master was rebased; use 'just push-upstream-sync' to update origin"
+    else
+      echo "upstream already current; rebuilt, signed, installed, and restarted current master"
+    fi
 
 # Force-push a successfully rebased master to this fork using lease protection.
 push-upstream-sync:
@@ -204,7 +209,7 @@ push-upstream-sync:
 
     git push --force-with-lease origin master
 
-# Rebase onto upstream, build/install it, then update this fork on GitHub.
+# Rebase onto upstream if needed, always build/install/restart, then update the fork.
 sync-upstream-push: sync-upstream
     just push-upstream-sync
 
