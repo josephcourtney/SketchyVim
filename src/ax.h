@@ -35,6 +35,8 @@ struct ax {
 };
 
 extern struct ax g_ax;
+bool ax_access_granted(void);
+bool ax_request_access(void);
 void ax_begin(struct ax* ax);
 void ax_clear(struct ax* ax);
 
