@@ -18,7 +18,7 @@ struct event_tap {
   CGEventMask mask;
 };
 
-struct event_tap g_event_tap;
+extern struct event_tap g_event_tap;
 extern volatile sig_atomic_t g_svim_suspended;
 
 bool event_tap_enabled(struct event_tap *event_tap);
