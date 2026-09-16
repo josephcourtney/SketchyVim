@@ -1,6 +1,9 @@
 set shell := ["zsh", "-cu"]
 
 label := "com.josephcourtney.svim"
+upstream_remote := "upstream"
+upstream_url := "https://github.com/FelixKratz/SketchyVim.git"
+upstream_branch := "master"
 
 # Show available commands.
 default:
@@ -43,6 +46,88 @@ pull-update:
     @just _install-files
     @just _restart-service
     @echo "svim updated from git, rebuilt, installed, and restarted"
+
+# Check whether FelixKratz/SketchyVim has commits not yet in this fork.
+upstream-check: _ensure-upstream
+    #!/bin/zsh
+    set -euo pipefail
+
+    git fetch --quiet {{upstream_remote}} {{upstream_branch}}
+    ref="{{upstream_remote}}/{{upstream_branch}}"
+    new_count=$(git rev-list --count HEAD.."$ref")
+
+    echo "local:    $(git rev-parse --short HEAD)"
+    echo "upstream: $(git rev-parse --short "$ref")"
+
+    if (( new_count == 0 )); then
+      echo "upstream: up to date"
+      exit 0
+    fi
+
+    echo "upstream: $new_count new commit(s)"
+    echo
+    git log --oneline --decorate HEAD.."$ref"
+
+# Rebase this fork's patch stack onto the latest upstream, rebuild, install, and restart.
+# Stops on conflicts so they can be resolved explicitly with git rebase --continue.
+sync-upstream: _ensure-upstream
+    #!/bin/zsh
+    set -euo pipefail
+
+    if [[ -n "$(git status --porcelain)" ]]; then
+      echo "working tree is not clean; commit or stash changes first" >&2
+      exit 1
+    fi
+
+    branch=$(git branch --show-current)
+    if [[ "$branch" != "master" ]]; then
+      echo "sync-upstream must be run from master (currently: ${branch:-detached})" >&2
+      exit 1
+    fi
+
+    git fetch {{upstream_remote}} {{upstream_branch}}
+    ref="{{upstream_remote}}/{{upstream_branch}}"
+    new_count=$(git rev-list --count HEAD.."$ref")
+
+    if (( new_count == 0 )); then
+      echo "already up to date with $ref"
+      exit 0
+    fi
+
+    echo "rebasing local patch stack onto $ref"
+    git rebase "$ref"
+    git submodule update --init --recursive
+
+    make distclean
+    make
+
+    just _install-files
+    just _restart-service
+
+    echo "synced with $ref, rebuilt, installed, and restarted"
+    echo "master was rebased; use 'just push-upstream-sync' to update origin"
+
+# Force-push a successfully rebased master to this fork using lease protection.
+push-upstream-sync:
+    #!/bin/zsh
+    set -euo pipefail
+
+    if [[ -n "$(git status --porcelain)" ]]; then
+      echo "working tree is not clean" >&2
+      exit 1
+    fi
+
+    branch=$(git branch --show-current)
+    if [[ "$branch" != "master" ]]; then
+      echo "push-upstream-sync must be run from master" >&2
+      exit 1
+    fi
+
+    git push --force-with-lease origin master
+
+# Rebase onto upstream, build/install it, then update this fork on GitHub.
+sync-upstream-push: sync-upstream
+    just push-upstream-sync
 
 # Start the installed service.
 start:
@@ -113,6 +198,16 @@ clean:
 # Remove both SketchyVim and libvim build outputs.
 distclean:
     make distclean
+
+_ensure-upstream:
+    #!/bin/zsh
+    set -euo pipefail
+
+    if git remote get-url {{upstream_remote}} >/dev/null 2>&1; then
+      git remote set-url {{upstream_remote}} {{upstream_url}}
+    else
+      git remote add {{upstream_remote}} {{upstream_url}}
+    fi
 
 _install-files:
     #!/bin/zsh
