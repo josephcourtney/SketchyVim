@@ -1,3 +1,4 @@
 [submodule "libvim"]
 	path = libvim
 	url = git@github.com:FelixKratz/libvim.git
+	ignore = untracked
