@@ -68,21 +68,51 @@ signing-setup:
     echo
     open -a "Keychain Access"
 
-# Install the current build and run it as a user LaunchAgent.
+# Report whether the installed svim currently has Accessibility access.
+access-check:
+    #!/bin/zsh
+    set -euo pipefail
+    svim="$HOME/.local/bin/svim"
+    if [[ ! -x "$svim" ]]; then
+      echo "svim is not installed; run: just install" >&2
+      exit 1
+    fi
+    if "$svim" --check-access; then
+      echo "Accessibility access: granted"
+    else
+      echo "Accessibility access: not granted"
+      exit 1
+    fi
+
+# Explicitly request Accessibility access once. The service is stopped first.
+access-request:
+    #!/bin/zsh
+    set -euo pipefail
+    just stop
+    svim="$HOME/.local/bin/svim"
+    if [[ ! -x "$svim" ]]; then
+      echo "svim is not installed; run: just install" >&2
+      exit 1
+    fi
+    "$svim" --request-access
+    echo
+    echo "After granting access in System Settings, run: just start"
+
+# Install the current build and run it as a user LaunchAgent when authorized.
 # This also stops the old Homebrew-managed svim service if one exists.
 install: build
     @if command -v brew >/dev/null 2>&1; then brew services stop svim >/dev/null 2>&1 || true; fi
     @just _sign-build
     @just _install-files
-    @just _restart-service
-    @echo "svim installed and running from $HOME/.local/bin/svim"
+    @just _restart-if-authorized
+    @echo "svim installed at $HOME/.local/bin/svim"
 
-# Rebuild the current checkout, sign it, install it, and restart the service.
+# Rebuild the current checkout, sign it, install it, and restart when authorized.
 update: rebuild
     @just _sign-build
     @just _install-files
-    @just _restart-service
-    @echo "svim rebuilt, signed, installed, and restarted"
+    @just _restart-if-authorized
+    @echo "svim rebuilt, signed, and installed"
 
 # Pull the fork, refresh submodules, rebuild everything, sign, install, and restart.
 pull-update:
@@ -92,8 +122,8 @@ pull-update:
     make
     @just _sign-build
     @just _install-files
-    @just _restart-service
-    @echo "svim updated from git, rebuilt, signed, installed, and restarted"
+    @just _restart-if-authorized
+    @echo "svim updated from git, rebuilt, signed, and installed"
 
 # Check whether FelixKratz/SketchyVim has commits not yet in this fork.
 upstream-check: _ensure-upstream
@@ -116,7 +146,7 @@ upstream-check: _ensure-upstream
     echo
     git log --oneline --decorate HEAD.."$ref"
 
-# Rebase this fork's patch stack onto the latest upstream, rebuild, sign, install, and restart.
+# Rebase this fork's patch stack onto the latest upstream, rebuild, install, and restart.
 # Stops on conflicts so they can be resolved explicitly with git rebase --continue.
 sync-upstream: _ensure-upstream
     #!/bin/zsh
@@ -151,9 +181,9 @@ sync-upstream: _ensure-upstream
 
     just _sign-build
     just _install-files
-    just _restart-service
+    just _restart-if-authorized
 
-    echo "synced with $ref, rebuilt, signed, installed, and restarted"
+    echo "synced with $ref, rebuilt, signed, and installed"
     echo "master was rebased; use 'just push-upstream-sync' to update origin"
 
 # Force-push a successfully rebased master to this fork using lease protection.
@@ -178,27 +208,32 @@ push-upstream-sync:
 sync-upstream-push: sync-upstream
     just push-upstream-sync
 
-# Start the installed service.
+# Start the installed service. Does not prompt for Accessibility permission.
 start:
     @just _start-service
 
-# Stop and unload the installed service.
+# Stop all known svim services and processes, including the legacy Homebrew service.
 stop:
     #!/bin/zsh
     set -euo pipefail
     service="gui/$(id -u)/{{label}}"
+
     if launchctl print "$service" >/dev/null 2>&1; then
-      launchctl bootout "$service"
-      echo "svim stopped"
-    else
-      echo "svim is not running"
+      launchctl bootout "$service" || true
     fi
 
-# Restart the installed service and reload its plist.
+    if command -v brew >/dev/null 2>&1; then
+      brew services stop svim >/dev/null 2>&1 || true
+    fi
+
+    pkill -x svim >/dev/null 2>&1 || true
+    echo "svim stopped"
+
+# Restart the installed service. Does not prompt for Accessibility permission.
 restart:
     @just _restart-service
 
-# Show service, process, and installed signing identity.
+# Show service, process, access, and installed signing identity.
 status:
     #!/bin/zsh
     set -euo pipefail
@@ -222,6 +257,11 @@ status:
     fi
 
     if [[ -x "$installed" ]]; then
+      if "$installed" --check-access; then
+        echo "Accessibility access: granted"
+      else
+        echo "Accessibility access: not granted"
+      fi
       echo "signature:"
       codesign -dv --verbose=2 "$installed" 2>&1 | grep -E '^(Identifier|Authority)=' || true
     fi
@@ -319,6 +359,20 @@ _install-files:
 
     plutil -lint "$plist" >/dev/null
 
+_restart-if-authorized:
+    #!/bin/zsh
+    set -euo pipefail
+    svim="$HOME/.local/bin/svim"
+    if "$svim" --check-access; then
+      just _restart-service
+    else
+      service="gui/$(id -u)/{{label}}"
+      launchctl bootout "$service" >/dev/null 2>&1 || true
+      pkill -x svim >/dev/null 2>&1 || true
+      echo "svim is installed but Accessibility access is not granted."
+      echo "Run: just access-request"
+    fi
+
 _start-service:
     #!/bin/zsh
     set -euo pipefail
@@ -326,9 +380,15 @@ _start-service:
     domain="gui/$(id -u)"
     service="$domain/{{label}}"
     plist="$HOME/Library/LaunchAgents/{{label}}.plist"
+    svim="$HOME/.local/bin/svim"
 
-    if [[ ! -x "$HOME/.local/bin/svim" || ! -f "$plist" ]]; then
+    if [[ ! -x "$svim" || ! -f "$plist" ]]; then
       echo "svim is not installed; run: just install" >&2
+      exit 1
+    fi
+
+    if ! "$svim" --check-access; then
+      echo "Accessibility access is not granted; run: just access-request" >&2
       exit 1
     fi
 
@@ -347,14 +407,22 @@ _restart-service:
     domain="gui/$(id -u)"
     service="$domain/{{label}}"
     plist="$HOME/Library/LaunchAgents/{{label}}.plist"
+    svim="$HOME/.local/bin/svim"
 
-    if [[ ! -x "$HOME/.local/bin/svim" || ! -f "$plist" ]]; then
+    if [[ ! -x "$svim" || ! -f "$plist" ]]; then
       echo "svim is not installed; run: just install" >&2
       exit 1
     fi
 
     if launchctl print "$service" >/dev/null 2>&1; then
       launchctl bootout "$service"
+    fi
+
+    pkill -x svim >/dev/null 2>&1 || true
+
+    if ! "$svim" --check-access; then
+      echo "Accessibility access is not granted; run: just access-request" >&2
+      exit 1
     fi
 
     # Give the previous process a moment to release SketchyVim's lock file.
