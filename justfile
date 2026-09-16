@@ -334,6 +334,7 @@ _install-files:
     /usr/bin/install -m 0755 bin/svim "$HOME/.local/bin/svim"
 
     plist="$HOME/Library/LaunchAgents/{{label}}.plist"
+    service_path="$HOME/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:/usr/bin:/bin:/usr/sbin:/sbin"
     cat > "$plist" <<PLIST
     <?xml version="1.0" encoding="UTF-8"?>
     <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -346,6 +347,15 @@ _install-files:
       <array>
         <string>$HOME/.local/bin/svim</string>
       </array>
+
+      <key>EnvironmentVariables</key>
+      <dict>
+        <key>PATH</key>
+        <string>$service_path</string>
+      </dict>
+
+      <key>ProcessType</key>
+      <string>Interactive</string>
 
       <key>RunAtLoad</key>
       <true/>
