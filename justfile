@@ -1,6 +1,7 @@
 set shell := ["zsh", "-cu"]
 
 label := "com.josephcourtney.svim"
+watch_label := "com.josephcourtney.svim-upstream-check"
 upstream_remote := "upstream"
 upstream_url := "https://github.com/FelixKratz/SketchyVim.git"
 upstream_branch := "master"
@@ -99,19 +100,24 @@ access-request:
     echo "After granting access in System Settings, run: just start"
 
 # Install the current build and run it as a user LaunchAgent when authorized.
+# Also install the periodic upstream update watcher.
 # This also stops the old Homebrew-managed svim service if one exists.
 install: build
     @if command -v brew >/dev/null 2>&1; then brew services stop svim >/dev/null 2>&1 || true; fi
     @just _sign-build
     @just _install-files
+    @just _install-upstream-watch
     @just _restart-if-authorized
+    @just _restart-upstream-watch
     @echo "svim installed at $HOME/.local/bin/svim"
 
 # Rebuild the current checkout, sign it, install it, and restart when authorized.
 update: rebuild
     @just _sign-build
     @just _install-files
+    @just _install-upstream-watch
     @just _restart-if-authorized
+    @just _restart-upstream-watch
     @echo "svim rebuilt, signed, and installed"
 
 # Pull the fork, refresh submodules, rebuild everything, sign, install, and restart.
@@ -122,7 +128,9 @@ pull-update:
     make
     @just _sign-build
     @just _install-files
+    @just _install-upstream-watch
     @just _restart-if-authorized
+    @just _restart-upstream-watch
     @echo "svim updated from git, rebuilt, signed, and installed"
 
 # Check whether FelixKratz/SketchyVim has commits not yet in this fork.
@@ -145,6 +153,48 @@ upstream-check: _ensure-upstream
     echo "upstream: $new_count new commit(s)"
     echo
     git log --oneline --decorate HEAD.."$ref"
+
+# Run the same one-shot upstream check used by the scheduled watcher.
+# Sends at most one notification per upstream commit and emits the
+# `svim_upstream_update` SketchyBar event when SketchyBar is available.
+upstream-watch:
+    @SVIM_REPO_PATH="$(git rev-parse --show-toplevel)" /bin/zsh scripts/upstream-watch.sh
+
+# Install/reinstall and immediately run the six-hour upstream watcher.
+upstream-watch-install:
+    @just _install-upstream-watch
+    @just _restart-upstream-watch
+
+# Stop the scheduled upstream watcher without affecting svim itself.
+upstream-watch-stop:
+    #!/bin/zsh
+    set -euo pipefail
+    service="gui/$(id -u)/{{watch_label}}"
+    if launchctl print "$service" >/dev/null 2>&1; then
+      launchctl bootout "$service" || true
+    fi
+    echo "svim upstream watcher stopped"
+
+# Show whether the periodic upstream watcher is loaded.
+upstream-watch-status:
+    #!/bin/zsh
+    set -euo pipefail
+    service="gui/$(id -u)/{{watch_label}}"
+    state_file="${XDG_STATE_HOME:-$HOME/.local/state}/svim/upstream-notified"
+
+    if launchctl print "$service" >/dev/null 2>&1; then
+      state=$(launchctl print "$service" | awk '/state =/ { print $3; exit }')
+      echo "watcher: loaded (${state:-waiting})"
+    else
+      echo "watcher: not loaded"
+    fi
+
+    echo "interval: 6 hours"
+    if [[ -f "$state_file" ]]; then
+      echo "last notified upstream: $(cut -c1-12 "$state_file")"
+    else
+      echo "last notified upstream: none"
+    fi
 
 # Rebase this fork's patch stack onto the latest upstream when needed, then always
 # rebuild, sign, install, and restart the current master.
@@ -182,7 +232,9 @@ sync-upstream: _ensure-upstream
 
     just _sign-build
     just _install-files
+    just _install-upstream-watch
     just _restart-if-authorized
+    just _restart-upstream-watch
 
     if (( new_count > 0 )); then
       echo "synced with $ref, rebuilt, signed, and installed"
@@ -238,11 +290,12 @@ stop:
 restart:
     @just _restart-service
 
-# Show service, process, access, and installed signing identity.
+# Show service, process, access, signing identity, and watcher state.
 status:
     #!/bin/zsh
     set -euo pipefail
     service="gui/$(id -u)/{{label}}"
+    watch_service="gui/$(id -u)/{{watch_label}}"
     installed="$HOME/.local/bin/svim"
 
     if launchctl print "$service" >/dev/null 2>&1; then
@@ -271,6 +324,12 @@ status:
       codesign -dv --verbose=2 "$installed" 2>&1 | grep -E '^(Identifier|Authority)=' || true
     fi
 
+    if launchctl print "$watch_service" >/dev/null 2>&1; then
+      echo "upstream watcher: loaded (every 6 hours)"
+    else
+      echo "upstream watcher: not loaded"
+    fi
+
 # Temporarily bypass SketchyVim without losing its current Vim state.
 suspend:
     pkill -USR1 -x svim
@@ -279,17 +338,27 @@ suspend:
 resume:
     pkill -USR2 -x svim
 
-# Follow stdout and stderr from the LaunchAgent.
+# Follow stdout and stderr from the SketchyVim LaunchAgent.
 logs:
     @mkdir -p "$HOME/Library/Logs"
     @touch "$HOME/Library/Logs/svim.log" "$HOME/Library/Logs/svim.err"
     tail -f "$HOME/Library/Logs/svim.log" "$HOME/Library/Logs/svim.err"
 
-# Stop the service and remove the installed binary and LaunchAgent.
+# Follow stdout and stderr from the periodic upstream watcher.
+upstream-watch-logs:
+    @mkdir -p "$HOME/Library/Logs"
+    @touch "$HOME/Library/Logs/svim-upstream-check.log" "$HOME/Library/Logs/svim-upstream-check.err"
+    tail -f "$HOME/Library/Logs/svim-upstream-check.log" "$HOME/Library/Logs/svim-upstream-check.err"
+
+# Stop services and remove the installed binary, watcher, and LaunchAgents.
 uninstall:
     @just stop
+    @just upstream-watch-stop
     rm -f "$HOME/.local/bin/svim"
+    rm -f "$HOME/.local/bin/svim-upstream-watch"
     rm -f "$HOME/Library/LaunchAgents/{{label}}.plist"
+    rm -f "$HOME/Library/LaunchAgents/{{watch_label}}.plist"
+    rm -f "${XDG_STATE_HOME:-$HOME/.local/state}/svim/upstream-notified"
     @echo "svim uninstalled; logs were left in $HOME/Library/Logs"
 
 # Remove build outputs only.
@@ -374,6 +443,64 @@ _install-files:
 
     plutil -lint "$plist" >/dev/null
 
+_install-upstream-watch:
+    #!/bin/zsh
+    set -euo pipefail
+
+    repo=$(git rev-parse --show-toplevel)
+    mkdir -p "$HOME/.local/bin"
+    mkdir -p "$HOME/Library/LaunchAgents"
+    mkdir -p "$HOME/Library/Logs"
+    mkdir -p "${XDG_STATE_HOME:-$HOME/.local/state}/svim"
+
+    /usr/bin/install -m 0755 scripts/upstream-watch.sh "$HOME/.local/bin/svim-upstream-watch"
+
+    plist="$HOME/Library/LaunchAgents/{{watch_label}}.plist"
+    service_path="$HOME/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:/usr/bin:/bin:/usr/sbin:/sbin"
+    cat > "$plist" <<PLIST
+    <?xml version="1.0" encoding="UTF-8"?>
+    <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+    <plist version="1.0">
+    <dict>
+      <key>Label</key>
+      <string>{{watch_label}}</string>
+
+      <key>ProgramArguments</key>
+      <array>
+        <string>$HOME/.local/bin/svim-upstream-watch</string>
+      </array>
+
+      <key>EnvironmentVariables</key>
+      <dict>
+        <key>PATH</key>
+        <string>$service_path</string>
+        <key>SVIM_REPO_PATH</key>
+        <string>$repo</string>
+        <key>SVIM_UPSTREAM_REMOTE</key>
+        <string>{{upstream_remote}}</string>
+        <key>SVIM_UPSTREAM_URL</key>
+        <string>{{upstream_url}}</string>
+        <key>SVIM_UPSTREAM_BRANCH</key>
+        <string>{{upstream_branch}}</string>
+      </dict>
+
+      <key>RunAtLoad</key>
+      <true/>
+
+      <key>StartInterval</key>
+      <integer>21600</integer>
+
+      <key>StandardOutPath</key>
+      <string>$HOME/Library/Logs/svim-upstream-check.log</string>
+
+      <key>StandardErrorPath</key>
+      <string>$HOME/Library/Logs/svim-upstream-check.err</string>
+    </dict>
+    </plist>
+    PLIST
+
+    plutil -lint "$plist" >/dev/null
+
 _restart-if-authorized:
     #!/bin/zsh
     set -euo pipefail
@@ -448,3 +575,24 @@ _restart-service:
 
     launchctl bootstrap "$domain" "$plist"
     echo "svim restarted"
+
+_restart-upstream-watch:
+    #!/bin/zsh
+    set -euo pipefail
+
+    domain="gui/$(id -u)"
+    service="$domain/{{watch_label}}"
+    plist="$HOME/Library/LaunchAgents/{{watch_label}}.plist"
+    watcher="$HOME/.local/bin/svim-upstream-watch"
+
+    if [[ ! -x "$watcher" || ! -f "$plist" ]]; then
+      echo "svim upstream watcher is not installed; run: just upstream-watch-install" >&2
+      exit 1
+    fi
+
+    if launchctl print "$service" >/dev/null 2>&1; then
+      launchctl bootout "$service"
+    fi
+
+    launchctl bootstrap "$domain" "$plist"
+    echo "svim upstream watcher loaded (every 6 hours)"
