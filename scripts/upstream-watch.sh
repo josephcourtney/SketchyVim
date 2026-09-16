@@ -62,10 +62,15 @@ if [[ "$last_notified" == "$sha" ]]; then
 fi
 
 message="Upstream SketchyVim has $count new commit(s) ($short_sha). Run just sync-upstream-push."
+notified=false
 
 if command -v hs >/dev/null 2>&1; then
-  SVIM_UPDATE_MESSAGE="$message" hs -c 'hs.notify.new({title="SketchyVim update available", informativeText=os.getenv("SVIM_UPDATE_MESSAGE")}):send()'
-else
+  if SVIM_UPDATE_MESSAGE="$message" hs -c 'hs.notify.new({title="SketchyVim update available", informativeText=os.getenv("SVIM_UPDATE_MESSAGE")}):send()' >/dev/null 2>&1; then
+    notified=true
+  fi
+fi
+
+if [[ "$notified" != true ]]; then
   /usr/bin/osascript - "$message" <<'APPLESCRIPT'
 on run argv
   display notification (item 1 of argv) with title "SketchyVim update available"
