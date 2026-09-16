@@ -1,0 +1,188 @@
+name: Upstream sync
+
+on:
+  schedule:
+    - cron: "17 10 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+env:
+  UPSTREAM_URL: https://github.com/FelixKratz/SketchyVim.git
+  UPSTREAM_BRANCH: master
+  SYNC_BRANCH: automation/upstream-sync
+
+jobs:
+  sync:
+    runs-on: macos-latest
+
+    steps:
+      - name: Check out fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --global url."https://github.com/".insteadOf git@github.com:
+
+      - name: Fetch upstream
+        id: upstream
+        run: |
+          git remote remove upstream 2>/dev/null || true
+          git remote add upstream "$UPSTREAM_URL"
+          git fetch upstream "$UPSTREAM_BRANCH"
+
+          count=$(git rev-list --count "HEAD..upstream/$UPSTREAM_BRANCH")
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse "upstream/$UPSTREAM_BRANCH")" >> "$GITHUB_OUTPUT"
+
+          if [[ "$count" -eq 0 ]]; then
+            echo "Fork already contains the latest upstream commit."
+          else
+            echo "$count new upstream commit(s) found."
+            git log --oneline "HEAD..upstream/$UPSTREAM_BRANCH"
+          fi
+
+      - name: Prepare rebased sync branch
+        if: steps.upstream.outputs.count != '0'
+        id: rebase
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git checkout -B "$SYNC_BRANCH" origin/master
+
+          if git rebase "upstream/$UPSTREAM_BRANCH"; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git status --short || true
+          git rebase --abort || true
+          echo "ok=false" >> "$GITHUB_OUTPUT"
+
+      - name: Report rebase conflict
+        if: steps.upstream.outputs.count != '0' && steps.rebase.outputs.ok == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM_SHA: ${{ steps.upstream.outputs.sha }}
+        run: |
+          set -euo pipefail
+
+          title="Upstream sync conflict"
+          body=$(cat <<EOF
+          The scheduled upstream sync could not rebase the fork's patch stack onto:
+
+          \
+          $UPSTREAM_SHA
+          \
+
+          Resolve this locally with:
+
+          \
+          just sync-upstream
+          \
+
+          The rebase will stop at the conflicting patch so it can be reviewed explicitly.
+
+          Workflow: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
+          EOF
+          )
+
+          issue=$(gh issue list --state open --search '"Upstream sync conflict" in:title' --json number --jq '.[0].number // empty')
+          if [[ -n "$issue" ]]; then
+            gh issue comment "$issue" --body "$body"
+          else
+            gh issue create --title "$title" --body "$body"
+          fi
+
+          exit 1
+
+      - name: Update submodules
+        if: steps.upstream.outputs.count != '0' && steps.rebase.outputs.ok == 'true'
+        run: git submodule update --init --recursive
+
+      - name: Build rebased fork
+        if: steps.upstream.outputs.count != '0' && steps.rebase.outputs.ok == 'true'
+        run: |
+          make distclean
+          make
+
+      - name: Push review branch
+        if: steps.upstream.outputs.count != '0' && steps.rebase.outputs.ok == 'true'
+        run: git push --force origin "HEAD:$SYNC_BRANCH"
+
+      - name: Open or update upstream-sync PR
+        if: steps.upstream.outputs.count != '0' && steps.rebase.outputs.ok == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM_SHA: ${{ steps.upstream.outputs.sha }}
+        run: |
+          set -euo pipefail
+
+          body_file=$(mktemp)
+          cat > "$body_file" <<EOF
+          Automated review of the fork rebased onto upstream commit \
+          $UPSTREAM_SHA\
+          .
+
+          The rebase and a clean macOS build both succeeded.
+
+          **This PR is a review/CI surface. Do not merge it with GitHub's merge, squash, or rebase buttons.** A true upstream sync rewrites the local patch stack. To accept this update while preserving the intended history, run locally:
+
+          \
+          git checkout master
+          git pull --ff-only
+          just sync-upstream-push
+          \
+
+          The next scheduled run will see that master contains the upstream commit.
+          EOF
+
+          pr=$(gh pr list \
+            --head "$SYNC_BRANCH" \
+            --base master \
+            --state open \
+            --json number \
+            --jq '.[0].number // empty')
+
+          if [[ -n "$pr" ]]; then
+            gh pr edit "$pr" \
+              --title "chore: review upstream SketchyVim sync" \
+              --body-file "$body_file"
+          else
+            gh pr create \
+              --head "$SYNC_BRANCH" \
+              --base master \
+              --title "chore: review upstream SketchyVim sync" \
+              --body-file "$body_file"
+          fi
+
+      - name: Close stale review PR when caught up
+        if: steps.upstream.outputs.count == '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          pr=$(gh pr list \
+            --head "$SYNC_BRANCH" \
+            --base master \
+            --state open \
+            --json number \
+            --jq '.[0].number // empty')
+
+          if [[ -n "$pr" ]]; then
+            gh pr comment "$pr" --body "Fork master now contains the latest upstream commit; closing this review PR."
+            gh pr close "$pr"
+          fi
