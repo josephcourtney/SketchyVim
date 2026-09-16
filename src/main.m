@@ -3,6 +3,7 @@
 #include "event_tap.h"
 #include "ax.h"
 #include "workspace.h"
+#include <string.h>
 
 void* g_workspace;
 
@@ -45,6 +46,21 @@ static void acquire_lockfile(void) {
 
 int main (int argc, char *argv[]) {
   NSApplicationLoad();
+
+  if (argc == 2 && strcmp(argv[1], "--check-access") == 0) {
+    return ax_access_granted() ? 0 : 1;
+  }
+
+  if (argc == 2 && strcmp(argv[1], "--request-access") == 0) {
+    bool granted = ax_request_access();
+    if (granted) {
+      printf("Accessibility access is already granted.\n");
+    } else {
+      printf("Accessibility access requested. Grant access in System Settings, then start svim.\n");
+    }
+    return 0;
+  }
+
   signal(SIGCHLD, SIG_IGN);
   signal(SIGPIPE, SIG_IGN);
   signal(SIGUSR1, suspend_svim);
