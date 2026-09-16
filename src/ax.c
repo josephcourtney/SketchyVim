@@ -3,12 +3,11 @@
 
 struct ax g_ax;
 
-void ax_begin(struct ax* ax) {
-  buffer_begin(&ax->buffer);
-  ax->system_element = NULL;
-  ax->selected_element = NULL;
-  ax->role = 0;
+bool ax_access_granted(void) {
+  return AXIsProcessTrusted();
+}
 
+bool ax_request_access(void) {
   const void *keys[] = { kAXTrustedCheckOptionPrompt };
   const void *values[] = { kCFBooleanTrue };
 
@@ -18,12 +17,24 @@ void ax_begin(struct ax* ax) {
                                &kCFCopyStringDictionaryKeyCallBacks,
                                &kCFTypeDictionaryValueCallBacks           );
 
-  ax->is_privileged = AXIsProcessTrustedWithOptions(options);
+  bool trusted = AXIsProcessTrustedWithOptions(options);
   CFRelease(options);
+  return trusted;
+}
+
+void ax_begin(struct ax* ax) {
+  buffer_begin(&ax->buffer);
+  ax->system_element = NULL;
+  ax->selected_element = NULL;
+  ax->role = 0;
+
+  ax->is_privileged = ax_access_granted();
 
   if (ax->is_privileged) ax->system_element = AXUIElementCreateSystemWide();
   else {
-    printf("Accessibility not granted. Exit.");
+    fprintf(stderr,
+            "Accessibility not granted. Run 'svim --request-access' once, "
+            "grant access in System Settings, then start svim again.\n");
     exit(1);
   }
 
