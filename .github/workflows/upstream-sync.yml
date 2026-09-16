@@ -80,30 +80,26 @@ jobs:
           set -euo pipefail
 
           title="Upstream sync conflict"
-          body=$(cat <<EOF
-          The scheduled upstream sync could not rebase the fork's patch stack onto:
-
-          \
-          $UPSTREAM_SHA
-          \
-
-          Resolve this locally with:
-
-          \
-          just sync-upstream
-          \
-
-          The rebase will stop at the conflicting patch so it can be reviewed explicitly.
-
-          Workflow: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
-          EOF
-          )
+          body_file=$(mktemp)
+          {
+            echo "The scheduled upstream sync could not rebase the fork's patch stack onto upstream commit \`$UPSTREAM_SHA\`."
+            echo
+            echo "Resolve this locally with:"
+            echo
+            echo '```sh'
+            echo 'just sync-upstream'
+            echo '```'
+            echo
+            echo "The rebase will stop at the conflicting patch so it can be reviewed explicitly."
+            echo
+            echo "Workflow: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          } > "$body_file"
 
           issue=$(gh issue list --state open --search '"Upstream sync conflict" in:title' --json number --jq '.[0].number // empty')
           if [[ -n "$issue" ]]; then
-            gh issue comment "$issue" --body "$body"
+            gh issue comment "$issue" --body-file "$body_file"
           else
-            gh issue create --title "$title" --body "$body"
+            gh issue create --title "$title" --body-file "$body_file"
           fi
 
           exit 1
@@ -131,23 +127,21 @@ jobs:
           set -euo pipefail
 
           body_file=$(mktemp)
-          cat > "$body_file" <<EOF
-          Automated review of the fork rebased onto upstream commit \
-          $UPSTREAM_SHA\
-          .
-
-          The rebase and a clean macOS build both succeeded.
-
-          **This PR is a review/CI surface. Do not merge it with GitHub's merge, squash, or rebase buttons.** A true upstream sync rewrites the local patch stack. To accept this update while preserving the intended history, run locally:
-
-          \
-          git checkout master
-          git pull --ff-only
-          just sync-upstream-push
-          \
-
-          The next scheduled run will see that master contains the upstream commit.
-          EOF
+          {
+            echo "Automated review of the fork rebased onto upstream commit \`$UPSTREAM_SHA\`."
+            echo
+            echo "The rebase and a clean macOS build both succeeded."
+            echo
+            echo "**This PR is a review/CI surface. Do not merge it with GitHub's merge, squash, or rebase buttons.** A true upstream sync rewrites the local patch stack. To accept this update while preserving the intended history, run locally:"
+            echo
+            echo '```sh'
+            echo 'git checkout master'
+            echo 'git pull --ff-only'
+            echo 'just sync-upstream-push'
+            echo '```'
+            echo
+            echo "The next scheduled run will see that master contains the upstream commit and close this review PR."
+          } > "$body_file"
 
           pr=$(gh pr list \
             --head "$SYNC_BRANCH" \
@@ -166,6 +160,17 @@ jobs:
               --base master \
               --title "chore: review upstream SketchyVim sync" \
               --body-file "$body_file"
+          fi
+
+      - name: Close resolved conflict issue
+        if: steps.upstream.outputs.count != '0' && steps.rebase.outputs.ok == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          issue=$(gh issue list --state open --search '"Upstream sync conflict" in:title' --json number --jq '.[0].number // empty')
+          if [[ -n "$issue" ]]; then
+            gh issue comment "$issue" --body "The patch stack now rebases and builds cleanly against current upstream."
+            gh issue close "$issue"
           fi
 
       - name: Close stale review PR when caught up
