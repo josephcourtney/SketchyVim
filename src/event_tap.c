@@ -1,5 +1,6 @@
 #include "event_tap.h"
 
+struct event_tap g_event_tap;
 volatile sig_atomic_t g_svim_suspended = 0;
 
 bool event_tap_check_blacklist(struct event_tap* event_tap,
