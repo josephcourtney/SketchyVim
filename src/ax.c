@@ -1,6 +1,8 @@
 #include "ax.h"
 #include "buffer.h"
 
+struct ax g_ax;
+
 void ax_begin(struct ax* ax) {
   buffer_begin(&ax->buffer);
   ax->system_element = NULL;
@@ -38,7 +40,7 @@ static inline bool ax_get_text(struct ax* ax) {
     if (!raw) {
       CFRelease(text_ref);
       return false;
-    } 
+    }
 
     if (!ax->buffer.raw || !(strcmp(ax->buffer.raw, raw) == 0)) {
       if (ax->buffer.raw) free(ax->buffer.raw);
@@ -62,7 +64,7 @@ static inline bool ax_get_cursor(struct ax* ax) {
   if (error == kAXErrorSuccess) {
     AXValueGetValue(text_range_ref, kAXValueCFRangeType, &text_range);
 
-    if (ax->buffer.cursor.position  != text_range.location || 
+    if (ax->buffer.cursor.position  != text_range.location ||
         ax->buffer.cursor.selection != text_range.length     ) {
       ax->buffer.cursor.position = text_range.location;
       ax->buffer.cursor.selection = text_range.length;
@@ -169,7 +171,7 @@ static inline bool ax_get_selected_element(struct ax* ax) {
 }
 
 bool ax_process_selected_element(struct ax* ax) {
-  ax->is_supported = ax_get_selected_element(ax); 
+  ax->is_supported = ax_get_selected_element(ax);
 
   bool success = true;
   if (ax->role == ROLE_TEXT && ax->buffer.cursor.mode != INSERT) {
@@ -205,7 +207,7 @@ CGEventRef ax_process_event(struct ax* ax, CGEventRef event) {
   // Command
   if (flags & FLAG_COMMAND)
     return event;
-  
+
   // Shift Enter
   if (character == ENTER && (flags & FLAG_SHIFT))
     return event;
@@ -222,7 +224,7 @@ CGEventRef ax_process_event(struct ax* ax, CGEventRef event) {
     // Enter in normal mode
     if (character == ENTER && ax->buffer.cursor.mode & NORMAL)
       return event;
-    
+
     bool was_insert = ax->buffer.cursor.mode & INSERT
                       || !ax->buffer.cursor.mode;
     buffer_input(&ax->buffer, character, count);
