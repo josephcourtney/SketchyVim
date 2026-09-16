@@ -34,7 +34,7 @@ struct ax {
   struct buffer buffer;
 };
 
-struct ax g_ax;
+extern struct ax g_ax;
 void ax_begin(struct ax* ax);
 void ax_clear(struct ax* ax);
 
