@@ -10,6 +10,9 @@ WARN_FLAGS = -Wall -Wno-array-bounds \
 	     -Wno-return-type -Werror
 CFLAGS = $(WARN_FLAGS) $(DEFINES) -g -Ilib -Ilib/libvim/proto -std=c99 -O2 #-fsanitize=address -fsanitize=undefined
 
+CODESIGN_IDENTITY ?= svim-local
+CODESIGN_IDENTIFIER ?= com.josephcourtney.svim
+
 # libvim vendors an older Vim configure script. Modern Clang emits warnings for
 # several of its feature probes; treating those warnings as errors makes the
 # probes incorrectly report that C99, ncurses, const, volatile, etc. are
@@ -29,7 +32,7 @@ SRC = src
 _OBJ = helpers.om workspace.om event_tap.o ax.o buffer.o line.o env_vars.o
 OBJ = $(patsubst %, $(ODIR)/%, $(_OBJ))
 
-.PHONY: all x86 arm64 universal sign lib lib-clean clean distclean
+.PHONY: all x86 arm64 universal sign sign-local lib lib-clean clean distclean
 
 all: $(ODIR)/svim
 
@@ -50,9 +53,22 @@ universal:
 	$(MAKE) arm64
 	lipo -create -output $(ODIR)/svim $(ODIR)/svim_x86 $(ODIR)/svim_arm64
 
+# Sign the ordinary local build with a persistent identity. This gives macOS a
+# stable designated requirement so privacy/accessibility grants survive rebuilds.
+sign-local: $(ODIR)/svim
+	codesign --force --sign "$(CODESIGN_IDENTITY)" \
+		--identifier "$(CODESIGN_IDENTIFIER)" \
+		--timestamp=none \
+		$(ODIR)/svim
+	codesign --verify --strict --verbose=2 $(ODIR)/svim
+
 sign:
 	$(MAKE) universal
-	codesign -fs 'svim-cert' $(ODIR)/svim
+	codesign --force --sign "$(CODESIGN_IDENTITY)" \
+		--identifier "$(CODESIGN_IDENTIFIER)" \
+		--timestamp=none \
+		$(ODIR)/svim
+	codesign --verify --strict --verbose=2 $(ODIR)/svim
 
 bundle: clean
 	$(MAKE) sign
