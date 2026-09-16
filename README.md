@@ -49,6 +49,53 @@ brew services start svim
 ```
 where you will be asked to grant accessibility permissions.
 
+For this fork, the repository also includes a `justfile` that builds the patched
+binary and manages it as a user LaunchAgent:
+
+```bash
+just install
+just status
+just update
+```
+
+The installed executable is kept at `~/.local/bin/svim`, so rebuilding the checkout
+does not disturb the running service.
+
+### Keeping the fork current with upstream
+
+The fork is maintained as a small patch stack on top of
+`FelixKratz/SketchyVim`. To see whether upstream has advanced:
+
+```bash
+just upstream-check
+```
+
+To rebase the local patch stack onto current upstream, rebuild, install, and
+restart:
+
+```bash
+just sync-upstream
+```
+
+After reviewing the result, update this GitHub fork with lease protection:
+
+```bash
+just push-upstream-sync
+```
+
+or perform both operations with:
+
+```bash
+just sync-upstream-push
+```
+
+A scheduled GitHub Actions workflow performs the same rebase and build as a
+validation check. When upstream advances and the patch stack still applies, it
+opens or updates `automation/upstream-sync` as a review PR. The PR is deliberately
+a review/CI surface rather than a merge target because accepting an upstream sync
+requires rewriting the fork's patch commits. If the automated rebase conflicts,
+the workflow opens or updates an issue instead.
+
 You can change the macOS selection color to anything you like with this command (which is my green):
 ```bash
 defaults write NSGlobalDomain AppleHighlightColor -string "0.615686 0.823529 0.454902"
