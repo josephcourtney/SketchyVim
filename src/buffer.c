@@ -76,8 +76,17 @@ static inline void buffer_sync_text(struct buffer* buffer) {
   }
 }
 
+static inline bool buffer_cursor_line_valid(const struct buffer* buffer,
+                                            linenr_T lnum) {
+  return lnum >= 1
+      && (uint64_t)lnum <= buffer->line_count
+      && buffer->lines != NULL
+      && buffer->lines[lnum - 1] != NULL;
+}
+
 static inline void buffer_sync_cursor(struct buffer* buffer) {
   pos_T cursor_pos = vimCursorGetPosition();
+  if (!buffer_cursor_line_valid(buffer, cursor_pos.lnum)) return;
   uint32_t pos = line_get_position_from_raw_position(
                                           buffer->lines[cursor_pos.lnum - 1],
                                           cursor_pos.col                     );
@@ -97,6 +106,9 @@ static inline void buffer_sync_cursor(struct buffer* buffer) {
       vimVisualGetRange(&end, &start);
       inverted = true;
     }
+
+    if (!buffer_cursor_line_valid(buffer, start.lnum)
+        || !buffer_cursor_line_valid(buffer, end.lnum)) return;
 
     uint32_t start_pos = line_get_position_from_raw_position(
                                                buffer->lines[start.lnum - 1],
